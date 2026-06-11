@@ -1,0 +1,22 @@
+{
+  "name": "quran-key",
+  "version": "1.0.0",
+  "description": "Advanced contextual Quran citation and search plugin for Obsidian.",
+  "main": "main.js",
+  "scripts": {
+    "dev": "typescript-compiler -w",
+    "build": "tsc"
+  },
+  "keywords": [
+    "obsidian",
+    "quran",
+    "academic",
+    "citation"
+  ],
+  "author": "Mohamed Saleh",
+  "license": "MIT",
+  "devDependencies": {
+    "obsidian": "^1.5.7",
+    "typescript": "^5.4.5"
+  }
+}
