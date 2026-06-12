@@ -4,6 +4,8 @@ import { QuranMemoryCache } from "../Cache/QuranMemoryCache";
 import { Ayah } from "../../Domain/Entities/Ayah";
 import { QuranText } from "../../Domain/ValueObjects/QuranText";
 
+import rawData from "../../../ayahs.json";
+
 export class ObsidianVaultDataSource implements QuranRepository {
     private vault: Vault;
     private cache: QuranMemoryCache;
@@ -13,32 +15,24 @@ export class ObsidianVaultDataSource implements QuranRepository {
         this.cache = QuranMemoryCache.getInstance();
     }
 
-    /**
-     * قراءة الملف حتمياً من داخل مجلد الإضافة المخصص لتجنب تلوث الفولت الشخصي للمخدم
-     */
     public async loadAll(): Promise<boolean> {
         try {
             if (this.cache.getAyahs().length > 0) {
                 return true;
             }
 
-            // استخدام الـ configDir للوصول للمجلد المخفي .obsidian/plugins/quran-key
-            const configDirectory = (this.vault as any).configDir || ".obsidian";
-            const ayahsFilePath = `${configDirectory}/plugins/quran-key/ayahs.json`;
+            // تحويل مصفوفة الـ JSON وتوليد الـ id الناقص حركياً ليتطابق الهيكل مع الـ Entity تماماً
+            const mappedAyahs: Ayah[] = (rawData as any[]).map((a, index) => ({
+                id: index + 1,
+                surah_id: a.surah_id,
+                ayah_id: a.ayah_id,
+                surah_name: a.surah_name,
+                text: a.text
+            }));
 
-            // التحقق من وجود ملف البيانات داخل المجلد الخاص بالإضافة عبر الـ Adapter
-            const fileExists = await this.vault.adapter.exists(ayahsFilePath);
-            if (!fileExists) {
-                console.error("Quran Key Plugin: ayahs.json was not found inside the plugin directory.");
-                return false;
-            }
+            this.cache.setAyahs(mappedAyahs);
 
-            const fileContent = await this.vault.adapter.read(ayahsFilePath);
-            const rawData: Ayah[] = JSON.parse(fileContent);
-
-            this.cache.setAyahs(rawData);
-
-            const giantStr = rawData
+            const giantStr = mappedAyahs
                 .map(a => QuranText.normalizeForSearch(a.text))
                 .join(" @@@ ");
                 
@@ -46,7 +40,7 @@ export class ObsidianVaultDataSource implements QuranRepository {
 
             return true;
         } catch (error) {
-            console.error("Quran Key Plugin: Critical error reading ayahs.json from plugin folder", error);
+            console.error("Quran Key Plugin: Critical error parsing embedded ayahs.json inside bundle", error);
             return false;
         }
     }
