@@ -12,6 +12,14 @@ export interface TransactionSettings {
 }
 
 export class ExecuteEditorTransaction {
+    // المخزن المركزي المشترك لإدارة الحالة الحركية للتراجع والتبديل (Toggle State) رغماً عن تعقيدات كودميرور
+    public static lastInsertion: {
+        line: number;
+        query: string;
+        ayahs: Ayah[];
+        isSnippet: boolean;
+    } | null = null;
+
     private static applyOrnateNumbers(text: string): string {
         return text.replace(/\((\d+)\)/g, (_, p1) => {
             const arabicDigits = p1.split('').map((d: string) => '٠١٢٣٤٥٦٧٨٩'[parseInt(d)]).join('');
@@ -41,9 +49,6 @@ export class ExecuteEditorTransaction {
         return finalCore + reference;
     }
 
-    /**
-     * تنفيذ الاستبدال الفوري النقي عبر دالة المحرر الأساسية لمنع عيوب التكرار وانزياح المؤشر تماماً
-     */
     public static execute(
         editor: Editor, 
         startPos: { line: number; ch: number }, 
@@ -53,7 +58,27 @@ export class ExecuteEditorTransaction {
         settings: TransactionSettings
     ): void {
         const finalOutput = this.formatOutput(fullAyahs, settings);
-        // العودة للـ Native ReplaceRange المستقرة والذرية لإبادة كود التكرار القديم حتماً
-        editor.replaceRange(finalOutput, startPos, endPos);
+        
+        // التقاط وتحديث بيانات المعاملة الحالية فوراً لربط مسار الـ Toggle حركياً بالنافذة والمنزلقة معاً
+        this.lastInsertion = {
+            line: startPos.line,
+            query: userSearchQuery,
+            ayahs: fullAyahs,
+            isSnippet: false
+        };
+
+        const cm = (editor as any).cm;
+
+        if (cm && typeof cm.dispatch === "function") {
+            const from = editor.posToOffset(startPos);
+            const to = editor.posToOffset(endPos);
+
+            cm.dispatch({
+                changes: { from, to, insert: finalOutput },
+                userEvent: "input"
+            });
+        } else {
+            editor.replaceRange(finalOutput, startPos, endPos);
+        }
     }
 }

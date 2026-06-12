@@ -8,13 +8,6 @@ import { SnippetExtractor } from "../Domain/Services/SnippetExtractor";
 export class ParseContextAndExtract {
     private repository: QuranRepository;
     private app: App;
-    
-    // كشاف حالة الذاكرة المؤقتة لتأمين ميزة الـ Fallback عند تكرار ضغط الـ Hotkey
-    private lastExpansion: {
-        lineIdx: number;
-        query: string;
-        fullAyahs: Ayah[];
-    } | null = null;
 
     constructor(app: App, repository: QuranRepository) {
         this.app = app;
@@ -25,21 +18,34 @@ export class ParseContextAndExtract {
         const cursor = editor.getCursor();
         const currentLine = editor.getLine(cursor.line);
 
-        // 1. فحص الـ Stateful Fallback: إذا ضغط اليوزر الـ Hotkey مجدداً على سطر ممتد مسبقاً
-        if (this.lastExpansion && this.lastExpansion.lineIdx === cursor.line && currentLine.includes("﴿")) {
-            const targetAyah = this.lastExpansion.fullAyahs[0];
-            const snippetText = SnippetExtractor.extractQuranSnippet(targetAyah.text, this.lastExpansion.query);
+        // 1. فحص الاقتصاص البيني الفوري الصارم: طالما المؤشر يقع داخل صيغة القوسين (كلمة١ - كلمة٢) والسطر به آية
+        const parenRegex = /\(([^)]+?-[^)]+?)\)/g;
+        let parenMatch;
+        while ((parenMatch = parenRegex.exec(currentLine)) !== null) {
+            const startCh = parenMatch.index;
+            const endCh = parenMatch.index + parenMatch[0].length;
             
-            if (snippetText !== targetAyah.text) {
-                const dummyAyah: Ayah = { ...targetAyah, text: snippetText };
-                const snippetOutput = ExecuteEditorTransaction.formatOutput([dummyAyah], settings);
-                
-                // استبدال السطر الممتد بالكامل بالشاهد المقتص النقي فوراً وبشكل ذري
-                editor.setLine(cursor.line, snippetOutput);
-                
-                // تصفير الكاش لتأمين السطر للعمليات المستقبلية
-                this.lastExpansion = null;
-                return true;
+            if (cursor.ch >= startCh && cursor.ch <= endCh) {
+                const verseMatch = currentLine.match(/﴿\s*(.*?)\s*﴾/);
+                if (verseMatch) {
+                    const fullVerseText = verseMatch[1];
+                    const parts = parenMatch[1].split("-");
+                    const startWord = parts[0].trim();
+                    const endWord = parts[1].trim();
+                    
+                    const cropped = SnippetExtractor.extractQuranRange(fullVerseText, startWord, endWord);
+                    if (cropped && cropped !== fullVerseText) {
+                        const startPos = { line: cursor.line, ch: startCh };
+                        const endPos = { line: cursor.line, ch: endCh };
+                        
+                        const matchedAyah = this.repository.getAllAyahs().find(a => QuranText.normalizeForSearch(a.text).includes(QuranText.normalizeForSearch(startWord)));
+                        if (matchedAyah) {
+                            const dummyAyah: Ayah = { ...matchedAyah, text: cropped };
+                            ExecuteEditorTransaction.execute(editor, startPos, endPos, [dummyAyah], "", settings);
+                            return true;
+                        }
+                    }
+                }
             }
         }
 
@@ -60,7 +66,7 @@ export class ParseContextAndExtract {
             return this.processTextQuery(editor, innerText, startPos, endPos, settings, onAmbiguity);
         }
 
-        // 4. الأولوية الثالثة: التحليل الرقمي والنطاقات الصريحة
+        // 4. الأولوية الثالثة: التحليل الرقمي والنطاقات الصريحة (البقرة: 1-3)
         if (currentLine.trim().length > 0) {
             const rangeRegex = /(?:^|\s)([\u0600-\u06FF]+(?:\s+[\u0600-\u06FF]+){0,2})\s*[:\s]\s*(\d+(?:\s*-\s*\d+)?(?:\s*[,،]\s*\d+(?:\s*-\s*\d+)?)*)/g;
             const matches = [...currentLine.matchAll(rangeRegex)];
@@ -78,14 +84,12 @@ export class ParseContextAndExtract {
                     const matchedAyahs = ayahsData.filter(a => a.surah_id === foundSurah.id && targetAyahIds.includes(a.ayah_id));
 
                     if (matchedAyahs.length > 0) {
-                        this.lastExpansion = null; // تصفير دائم في العمليات الرقمية الصريحة
                         ExecuteEditorTransaction.execute(editor, startPos, endPos, matchedAyahs, "", settings);
                         return true;
                     }
                 }
             }
 
-            // 5. الأولوية الرابعة: النافذة المنزلقة (Sliding Window) للبحث التلقائي
             return this.executeSlidingWindow(editor, currentLine, cursor.line, settings, onAmbiguity);
         }
 
@@ -110,11 +114,9 @@ export class ParseContextAndExtract {
         const matches = ayahsData.filter(a => strictRegex.test(QuranText.normalizeForSearch(a.text)));
 
         if (matches.length === 1) {
-            this.lastExpansion = { lineIdx: startPos.line, query, fullAyahs: [matches[0]] };
             ExecuteEditorTransaction.execute(editor, startPos, endPos, [matches[0]], query, settings);
             return true;
         } else if (matches.length > 1) {
-            this.lastExpansion = { lineIdx: startPos.line, query, fullAyahs: [matches[0]] };
             ExecuteEditorTransaction.execute(editor, startPos, endPos, [matches[0]], query, settings);
             const newEndPos = { line: startPos.line, ch: startPos.ch + ExecuteEditorTransaction.formatOutput([matches[0]], settings).length };
             onAmbiguity(query, matches, startPos, newEndPos);
@@ -156,13 +158,6 @@ export class ParseContextAndExtract {
 
                     const startPos = { line: lineIdx, ch: matchChIndex };
                     const endPos = { line: lineIdx, ch: matchChIndex + combinedSegment.length };
-
-                    // تسجيل كاش الحالة الحركية للشاهد والسطر الحالي لتأمين ميزة الـ Toggle
-                    this.lastExpansion = {
-                        lineIdx: lineIdx,
-                        query: combinedSegment,
-                        fullAyahs: [matches[0]]
-                    };
 
                     if (matches.length === 1) {
                         ExecuteEditorTransaction.execute(editor, startPos, endPos, [matches[0]], combinedSegment, settings);

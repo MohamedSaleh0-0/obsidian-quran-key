@@ -46,6 +46,17 @@ export class QuranKeySettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
+        // إضافة مفتاح التحكم التخصيصي في لوحة الإحصائيات النصية بناءً على طلبك
+        new Setting(containerEl)
+            .setName("إظهار لوحة التحليلات والإحصائيات")
+            .setDesc("تفعيل أو تعطيل ظهور لوحة البيانات الفورية (إجمالي المواضع، الأكثر تكراراً، الكثافة) أسفل شريط البحث مباشرة داخل نوافذ الفرز.")
+            .addToggle(toggle => toggle
+                .setValue((this.plugin.settings as any).showAnalytics)
+                .onChange(async (value) => {
+                    (this.plugin.settings as any).showAnalytics = value;
+                    await this.plugin.saveSettings();
+                }));
+
         containerEl.createEl("h3", { text: "تنسيق مفسر الأقواس المزخرفة (Dynamic Highlights Style)" });
 
         new Setting(containerEl)

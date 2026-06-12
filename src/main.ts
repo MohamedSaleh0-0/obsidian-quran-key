@@ -6,7 +6,9 @@ import { TransactionSettings } from "./UseCases/ExecuteEditorTransaction";
 import { QuranSuggestModal } from "./Presentation/Modals/QuranSuggestModal";
 import { QuranKeySettingTab } from "./Presentation/Settings/SmartAyahSettings";
 
-export interface QuranKeySettings extends TransactionSettings {}
+export interface QuranKeySettings extends TransactionSettings {
+    showAnalytics: boolean; // خيار التحكم في لوحة الإحصائيات
+}
 
 const DEFAULT_SETTINGS: QuranKeySettings = {
     useOrnateNumbers: true,
@@ -15,7 +17,8 @@ const DEFAULT_SETTINGS: QuranKeySettings = {
     quranFontFamily: "'Amiri', 'KFGQPC Uthman Taha Naskh', serif",
     quranFontSize: 1.1,
     quranLineHeight: 2.1,
-    quranColor: "#dfc56b"
+    quranColor: "#dfc56b",
+    showAnalytics: true // تشغيل اللوحة افتراضياً
 };
 
 const quranDecorator = new MatchDecorator({
@@ -99,6 +102,71 @@ export default class QuranKeyPlugin extends Plugin {
                         new QuranSuggestModal(this.app, this.repository, editor, this.settings, query, matches, start, end).open();
                     }
                 );
+            }
+        });
+
+        // 1. أمر إزالة المصدر المرجعي [Surah:Verse] من السطر الحالي
+        this.addCommand({
+            id: "remove-quran-reference",
+            name: "Remove Quran Reference From Line",
+            editorCallback: (editor) => {
+                const lineNum = editor.getCursor().line;
+                const lineText = editor.getLine(lineNum);
+                const cleanLine = lineText.replace(/\s*\[[\u0600-\u06FF\s]+:\d+(?:-\d+)?\]/g, "");
+                editor.setLine(lineNum, cleanLine);
+                new Notice("تمت إزالة المصدر المرجعي من السطر.");
+            }
+        });
+
+        // 2. أمر تحويل المصدر إلى حاشية سفلية (Footnote) متوافقة مع تصدير Pandoc
+        this.addCommand({
+            id: "convert-reference-to-footnote",
+            name: "Convert Quran Reference To Footnote",
+            editorCallback: (editor) => {
+                const lineNum = editor.getCursor().line;
+                const lineText = editor.getLine(lineNum);
+                const refRegex = /\[([\u0600-\u06FF\s]+:\d+(?:-\d+)?)\]/;
+                const match = lineText.match(refRegex);
+
+                if (match) {
+                    const fullContent = editor.getValue();
+                    const existingFootnotes = fullContent.match(/\[\^quran\d+\]/g);
+                    const nextIndex = existingFootnotes ? existingFootnotes.length + 1 : 1;
+                    
+                    const footnoteTag = `[^quran${nextIndex}]`;
+                    const updatedLine = lineText.replace(refRegex, footnoteTag);
+                    editor.setLine(lineNum, updatedLine);
+
+                    const lastLineNum = editor.lineCount() - 1;
+                    const lastLineText = editor.getLine(lastLineNum);
+                    const footerString = `\n\n${footnoteTag}: ${match[1]}`;
+                    
+                    editor.replaceRange(footerString, { line: lastLineNum, ch: lastLineText.length });
+                    new Notice(`تم تحويل المرجع إلى حاشية سفلية ${footnoteTag}`);
+                } else {
+                    new Notice("لم يتم العثور على مرجع تخريج صالح في هذا السطر.");
+                }
+            }
+        });
+
+        // 3. أمر إزالة التشكيل العام من النص المظلل أو السطر الحالي
+        this.addCommand({
+            id: "strip-tashkeel-globally",
+            name: "Strip Tashkeel From Selection Or Line",
+            editorCallback: (editor) => {
+                const selectedText = editor.getSelection();
+                const tashkeelRegex = /[\u0610-\u061A\u064B-\u065F\u06D6-\u06DC\u06DF-\u06E8\u06EA-\u06ED\u0670]/g;
+
+                if (selectedText.length > 0) {
+                    const cleanText = selectedText.replace(tashkeelRegex, "");
+                    editor.replaceSelection(cleanText);
+                } else {
+                    const lineNum = editor.getCursor().line;
+                    const lineText = editor.getLine(lineNum);
+                    const cleanLine = lineText.replace(tashkeelRegex, "");
+                    editor.setLine(lineNum, cleanLine);
+                }
+                new Notice("تم تجريد النص من التشكيل وعلامات الضبط.");
             }
         });
     }

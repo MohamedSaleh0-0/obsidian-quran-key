@@ -2,6 +2,9 @@ import { Ayah } from "../../Domain/Entities/Ayah";
 
 export class AnalyticsDashboard {
     private container: HTMLDivElement;
+    private totalEl: HTMLSpanElement;
+    private maxEl: HTMLSpanElement;
+    private denseEl: HTMLSpanElement;
 
     constructor(parentEl: HTMLElement) {
         this.container = document.createElement("div");
@@ -11,35 +14,32 @@ export class AnalyticsDashboard {
         this.container.innerHTML = `
             <div style="flex: 1; text-align: center; border-left: 1px solid var(--border-color);">
                 <span style="color: var(--text-muted); display: block; margin-bottom: 4px; font-size: 0.9em;">إجمالي المواضع</span>
-                <span id="quran-node-total" style="font-weight: 600; color: var(--text-accent); font-size: 1.1em;">-</span>
+                <span class="quran-node-total" style="font-weight: 600; color: var(--text-accent); font-size: 1.1em;">-</span>
             </div>
             <div style="flex: 2; text-align: center; border-left: 1px solid var(--border-color);">
                 <span style="color: var(--text-muted); display: block; margin-bottom: 4px; font-size: 0.9em;">الأكثر تكراراً</span>
-                <span id="quran-node-max" style="font-weight: 600; color: var(--text-normal); font-size: 1.1em;">-</span>
+                <span class="quran-node-max" style="font-weight: 600; color: var(--text-normal); font-size: 1.1em;">-</span>
             </div>
             <div style="flex: 1.5; text-align: center;">
                 <span style="color: var(--text-muted); display: block; margin-bottom: 4px; font-size: 0.9em;">الأعلى كثافة نصية</span>
-                <span id="quran-node-dense" style="font-weight: 600; color: var(--text-normal); font-size: 1.1em;">-</span>
+                <span class="quran-node-dense" style="font-weight: 600; color: var(--text-normal); font-size: 1.1em;">-</span>
             </div>
         `;
         
-        parentEl.insertAdjacentElement('afterend', this.container);
+        // حقن اللوحة في نهاية عنصر الـ prompt (داخل الحاوية مباشرة وتحت البار حتماً)
+        parentEl.insertAdjacentElement('beforeend', this.container);
+
+        // ربط نواتج العرض بنطاق الحاوية المحلية وعزلها تماماً عن المعرفات العالمية منعا للـ Race Conditions
+        this.totalEl = this.container.querySelector(".quran-node-total") as HTMLSpanElement;
+        this.maxEl = this.container.querySelector(".quran-node-max") as HTMLSpanElement;
+        this.denseEl = this.container.querySelector(".quran-node-dense") as HTMLSpanElement;
     }
 
-    /**
-     * تحديث أرقام وإحصائيات لوحة العرض فورياً بناءً على فرز نتائج البحث الحالية
-     */
     public update(matches: Ayah[], allAyahs: Ayah[]): void {
-        const nodeTotal = document.getElementById("quran-node-total");
-        const nodeMax = document.getElementById("quran-node-max");
-        const nodeDense = document.getElementById("quran-node-dense");
-
-        if (!nodeTotal || !nodeMax || !nodeDense) return;
-
         if (!matches || matches.length === 0) {
-            nodeTotal.innerText = "0";
-            nodeMax.innerText = "-";
-            nodeDense.innerText = "-";
+            this.totalEl.innerText = "0";
+            this.maxEl.innerText = "-";
+            this.denseEl.innerText = "-";
             return;
         }
 
@@ -84,8 +84,8 @@ export class AnalyticsDashboard {
         const denseSample = allAyahs.find(a => a.surah_id === denseSurahId);
         const denseSurahName = denseSample ? denseSample.surah_name : "";
 
-        nodeTotal.innerText = matches.length.toString();
-        nodeMax.innerText = maxSurahName ? `${maxSurahName} (${maxCount}, ${maxSurahDensityPercent})` : "-";
-        nodeDense.innerText = denseSurahName ? `${denseSurahName} (${(highestDensity * 100).toFixed(3)}%)` : "-";
+        this.totalEl.innerText = matches.length.toString();
+        this.maxEl.innerText = maxSurahName ? `${maxSurahName} (${maxCount}, ${maxSurahDensityPercent})` : "-";
+        this.denseEl.innerText = denseSurahName ? `${denseSurahName} (${(highestDensity * 100).toFixed(3)}%)` : "-";
     }
 }
