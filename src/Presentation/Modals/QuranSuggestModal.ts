@@ -40,8 +40,10 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
     onOpen() {
         super.onOpen();
         
-        if (this.inputEl.parentElement) {
-            this.dashboard = new AnalyticsDashboard(this.inputEl);
+        // حقن لوحة الإحصائيات داخل حاوية الـ Prompt لتستقر حتماً تحت الـ Search Bar مباشرة وبشكل متكيف
+        const promptEl = this.modalEl.querySelector(".prompt");
+        if (promptEl) {
+            this.dashboard = new AnalyticsDashboard(promptEl as HTMLElement);
         }
 
         if (this.initialQuery) {
@@ -53,54 +55,69 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
         }
     }
 
+    /**
+     * مفسر تطابق فهرسي صارم مقتبس من quranUtils.js لتقييد صبغ الألوان في النطاق المكتوب بالسيرش فقط
+     */
     private highlightText(text: string, query: string): string {
         if (!query || query.trim().length === 0) return text;
-        const words = query.trim().split(/\s+/).map(w => QuranText.normalizeForSearch(w)).filter(w => w.length > 0);
-        let highlighted = text;
-        
-        const lFillers = '[\\u064B-\\u065F\\u0670\\u06E6\\u06E5\\u06D6-\\u06DC\\u06DF-\\u06E8\\u06EA-\\u06ED]*';
-        const alefClass = '[اأإآٱءىٰ\\u064B-\\u065F\\u0670\\u06E6\\u06E5\\u06D6-\\u06DC\\u06DF-\\u06E8\\u06EA-\\u06ED]';
 
-        for (const word of words) {
-            if (word.length < 2) continue;
-            
-            let pattern = '';
-            for (let i = 0; i < word.length; i++) {
-                const char = word[i];
-                let charPattern = '';
+        const verseWords = text.trim().split(/\s+/);
+        const normVerseWords = verseWords.map(w => QuranText.normalizeForSearch(w));
+        
+        const cleanQuery = QuranText.normalizeForSearch(query);
+        const searchWords = cleanQuery.split(/\s+/).filter(w => w.length > 0);
+        
+        if (searchWords.length === 0) return text;
+
+        const patternArr = searchWords.map(w => QuranText.makeMedialAlefsOptional(w));
+        let matchStartIndex = -1;
+        const matchLength = searchWords.length;
+
+        for (let i = 0; i <= normVerseWords.length - searchWords.length; i++) {
+            let match = true;
+            for (let j = 0; j < searchWords.length; j++) {
+                const isLastWord = (j === searchWords.length - 1);
+                const regexStr = '^' + patternArr[j] + (isLastWord ? '' : '$');
+                const r = new RegExp(regexStr);
                 
-                if (char === 'ا') {
-                    charPattern = `(?:${alefClass}+)`;
-                } else if (char === 'ي') {
-                    charPattern = '[ييئ]';
-                } else if (char === 'و') {
-                    charPattern = '[ووؤ]';
-                } else if (char === 'ه') {
-                    charPattern = '[ههة]';
-                } else {
-                    charPattern = char;
-                }
-                
-                if (i === 0) {
-                    pattern += charPattern;
-                } else {
-                    pattern += lFillers + charPattern;
+                if (!r.test(normVerseWords[i + j])) {
+                    match = false;
+                    break;
                 }
             }
-            pattern += lFillers;
-
-            try {
-                const rx = new RegExp(`(${pattern})`, 'g');
-                highlighted = highlighted.replace(rx, '<b style="color: var(--text-accent); font-weight: bold;">$1</b>');
-            } catch (e) {}
+            if (match) {
+                matchStartIndex = i;
+                break;
+            }
         }
-        return highlighted;
+
+        if (matchStartIndex !== -1) {
+            const before = verseWords.slice(0, matchStartIndex).join(' ');
+            const matchedPhrase = verseWords.slice(matchStartIndex, matchStartIndex + matchLength).join(' ');
+            const after = verseWords.slice(matchStartIndex + matchLength).join(' ');
+
+            const colorStyle = `color: ${this.settings.quranColor || '#dfc56b'}; font-weight: bold;`;
+            return `${before ? before + ' ' : ''}<span style="${colorStyle}">${matchedPhrase}</span>${after ? ' ' + after : ''}`;
+        }
+
+        return text;
     }
 
+    /**
+     * الفرز الحركي المرن: فك القفل التلقائي لتوسيع نطاق السيرش لو قام المستخدم بالتعديل أو مسح النص الحالي
+     */
     getSuggestions(query: string): Ayah[] {
         this.currentQuery = query;
-        const sourcePool = this.preFilteredMatches || this.repository.getAllAyahs();
-        const cleanQueryWords = query.trim().split(/\s+/).map(w => QuranText.normalizeForSearch(w)).filter(w => w.length > 0);
+        
+        const cleanQuery = QuranText.normalizeForSearch(query);
+        const cleanInitial = this.initialQuery ? QuranText.normalizeForSearch(this.initialQuery) : "";
+        
+        // كسر الحظر حركياً: إذا كان السيرش يتفرع من النص الأصلي نلتزم بالـ PreFiltered، وإلا نفتح البحث لكامل المصحف فوراً
+        const usePreFiltered = this.preFilteredMatches && cleanQuery.length > 0 && 
+            (cleanQuery.includes(cleanInitial) || cleanInitial.includes(cleanQuery));
+            
+        const sourcePool = usePreFiltered ? this.preFilteredMatches! : this.repository.getAllAyahs();
+        const cleanQueryWords = cleanQuery.split(/\s+/).filter(w => w.length > 0);
 
         if (cleanQueryWords.length === 0) {
             if (this.dashboard) this.dashboard.update([], []);

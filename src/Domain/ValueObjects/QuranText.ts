@@ -1,63 +1,59 @@
 export class QuranText {
-    private static readonly TASHKEEL_REGEX = /[\u0610-\u061A\u064B-\u065F\u06D6-\u06DC\u06DF-\u06E8\u06EA-\u06ED]/g;
-    private static readonly ALEF_KHANJARIYA = /\u0670/g;
-
-    /**
-     * حذف التشكيل وعلامات الضبط المصحفية بالكامل لتهيئة النص
-     */
     public static stripTashkeel(text: string): string {
         if (!text) return "";
         return text
-            .replace(this.ALEF_KHANJARIYA, '')
-            .replace(this.TASHKEEL_REGEX, "");
+            .replace(/\u0670/g, '') // حذف الألف الخنجرية حتماً
+            .replace(/[\u0610-\u061A\u064B-\u065F\u06D6-\u06DC\u06DF-\u06E8\u06EA-\u06ED]/g, ""); // حذف التشكيل وعلامات الوقف
     }
-
-    /**
-     * توحيد الحروف العثمانية والقياسية لضمان دقة المطابقة والبحث
-     */
+    
     public static normalizeForSearch(text: string): string {
-        let txt = this.stripTashkeel(text);
+        if (!text) return "";
         
-        // معالجة الكلمات المكتوبة بالواو عثمانيا وتصحيحها قياسيا للبحث
-        txt = txt
-            .replace(/صلوة/g, "صلاه")
-            .replace(/زكوة/g, "زكاه")
-            .replace(/حيوة/g, "حياه")
-            .replace(/مشكوة/g, "مشكاه");
+        // التلصيم القاطع الصارم لـ يا أيها: توحيدها وتطهيرها تماماً قبل أي معالجة أو تقطيع
+        let txt = text.trim()
+            .replace(/يا\s+أيها/g, "يايها")
+            .replace(/ياأيها/g, "يايها")
+            .replace(/يأيها/g, "يايها");
 
-        // توحيد الألفات والهمزات والياءات والهاءات وحذف الكشيدة
+        txt = this.stripTashkeel(txt);
+        
+        // معالجة الانقلابات العثمانية الشهيرة من كود v1.3.0 المستقر
+        txt = txt.replace(/صلوة/g, "صلاه")
+                 .replace(/زكوة/g, "زكاه")
+                 .replace(/حيوة/g, "حياه")
+                 .replace(/مشكوة/g, "مشكاه");
+                 
+        // توحيد كراسي الهمزات والألفات
+        txt = txt.replace(/[أإآٱءى]/g, "ا")
+                 .replace(/[ييئ]/g, "ي")
+                 .replace(/ؤ/g, "و")
+                 .replace(/ة/g, "ه")
+                 .replace(/ـ/g, "");
+                 
+        // دمج وضغط أي ألف مزدوجة متبقية ناتجة عن تداخل الإدخال (ياايها -> يايها) لتطابق المصحف حتماً
+        txt = txt.replace(/ياا/g, "يا");
+
         return txt
-            .replace(/[أإآٱءى]/g, "ا")
-            .replace(/[يئ]/g, "ي")
-            .replace(/ؤ/g, "و")
-            .replace(/ة/g, "ه")
-            .replace(/ـ/g, "") 
-            .replace(/[^\u0621-\u064A\s0-9٠-٩]/g, "") // إبقاء المحارف العربية والأرقام فقط
-            .replace(/ا+/g, "ا"); // دمج الألفات المتكررة إن وجدت
+            .replace(/[^\u0621-\u064A\s0-9٠-٩]/g, "")
+            .replace(/ا+/g, "ا")
+            .replace(/\s+/g, " ")
+            .trim();
     }
 
-    /**
-     * جعل الألف الواسطية اختيارية في التعبير النمطي للتعامل مع حذف الألف رسما عثمانيا
-     */
     public static makeMedialAlefsOptional(word: string): string {
-        if (word.length <= 2) return word;
-        
-        let result = word[0];
+        if (!word || word.length <= 2) return word; 
+        let res = word[0];
         for (let i = 1; i < word.length - 1; i++) {
-            if (word[i] === 'ا') {
-                result += 'ا?';
-            } else {
-                result += word[i];
-            }
+            if (word[i] === 'ا') res += 'ا?';
+            else res += word[i];
         }
-        return result + word[word.length - 1];
+        return res + word[word.length - 1];
     }
 
-    /**
-     * توحيد الأرقام وتحويل الأرقام الهندية إلى أرقام عربية قياسية
-     */
-    public static normalizeNumbers(str: string): string {
-        if (!str) return str;
-        return str.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+    public static normalizeNumbers(text: string): string {
+        if (!text) return "";
+        return text
+            .replace(/[٠-٩]/g, d => "٠١٢٣٤٥٦٧٨٩".indexOf(d).toString())
+            .replace(/[۰-۹]/g, d => "۰۱۲۳۴۵۶۷۸۹".indexOf(d).toString());
     }
 }

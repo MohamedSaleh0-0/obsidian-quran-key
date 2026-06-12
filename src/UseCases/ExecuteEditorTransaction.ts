@@ -1,17 +1,17 @@
 import { Editor } from "obsidian";
 import { Ayah } from "../Domain/Entities/Ayah";
-import { SnippetExtractor } from "../Domain/Services/SnippetExtractor";
 
 export interface TransactionSettings {
     useOrnateNumbers: boolean;
     stripTashkeel: boolean;
     referenceFormat: string;
+    quranFontFamily: string;
+    quranFontSize: number;
+    quranLineHeight: number;
+    quranColor: string;
 }
 
 export class ExecuteEditorTransaction {
-    /**
-     * تحويل الأرقام العادية إلى أرقام مزخرفة مصحفية بنظام الـ Unicode
-     */
     private static applyOrnateNumbers(text: string): string {
         return text.replace(/\((\d+)\)/g, (_, p1) => {
             const arabicDigits = p1.split('').map((d: string) => '٠١٢٣٤٥٦٧٨٩'[parseInt(d)]).join('');
@@ -19,9 +19,6 @@ export class ExecuteEditorTransaction {
         });
     }
 
-    /**
-     * صياغة النص النهائي والإحالة المرجعية لآية واحدة أو مجموعة آيات متتالية
-     */
     public static formatOutput(ayahs: Ayah[], settings: TransactionSettings, forceStrip: boolean = false): string {
         if (ayahs.length === 0) return "";
 
@@ -45,7 +42,7 @@ export class ExecuteEditorTransaction {
     }
 
     /**
-     * تنفيذ خدعة التراجع الثنائية المعكوسة (Two-Step Undo) داخل محرر أوبسيديان لخدمة الـ Ctrl + Z
+     * تنفيذ الاستبدال الفوري النقي عبر دالة المحرر الأساسية لمنع عيوب التكرار وانزياح المؤشر تماماً
      */
     public static execute(
         editor: Editor, 
@@ -55,26 +52,8 @@ export class ExecuteEditorTransaction {
         userSearchQuery: string,
         settings: TransactionSettings
     ): void {
-        const fullOutput = this.formatOutput(fullAyahs, settings);
-        
-        let snippetOutput = fullOutput;
-        if (fullAyahs.length === 1 && userSearchQuery.trim().length > 0) {
-            const snippetText = SnippetExtractor.extractQuranSnippet(fullAyahs[0].text, userSearchQuery);
-            if (snippetText !== fullAyahs[0].text) {
-                const dummyAyah: Ayah = { ...fullAyahs[0], text: snippetText };
-                snippetOutput = this.formatOutput([dummyAyah], settings);
-            }
-        }
-
-        // تنفيذ خطوتي الإدراج تتابعياً بشكل ذري لحقنهما في الـ Undo Stack
-        // الخطوة 1: إنزال الشاهد المقتص أولاً
-        editor.replaceRange(snippetOutput, startPos, endPos);
-        
-        // الخطوة 2: استبدال الشاهد فوراً بالآية الكاملة في نفس اللحظة
-        const currentEndPos = { 
-            line: startPos.line, 
-            ch: startPos.ch + snippetOutput.length 
-        };
-        editor.replaceRange(fullOutput, startPos, currentEndPos);
+        const finalOutput = this.formatOutput(fullAyahs, settings);
+        // العودة للـ Native ReplaceRange المستقرة والذرية لإبادة كود التكرار القديم حتماً
+        editor.replaceRange(finalOutput, startPos, endPos);
     }
 }
