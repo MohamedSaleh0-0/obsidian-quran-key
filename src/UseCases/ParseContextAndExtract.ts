@@ -17,8 +17,34 @@ export class ParseContextAndExtract {
     public execute(editor: Editor, settings: TransactionSettings, onAmbiguity: (query: string, matches: Ayah[], start: any, end: any) => void): boolean {
         const cursor = editor.getCursor();
         const currentLine = editor.getLine(cursor.line);
+        const lastInsertion = ExecuteEditorTransaction.lastInsertion;
 
-        // 1. الأولوية الصارمة: الاقتصاص البيني الحركي عند وجود صيغة (كلمة1 - كلمة2) والمؤشر بداخلها
+        // 1. ميزة الـ Stateful Toggle Fallback: إدارة التبديل المتتالي بين الآية الكاملة وموضع الشاهد النقي
+        if (lastInsertion && lastInsertion.line === cursor.line && currentLine.includes("﴿") && currentLine.includes("﴾")) {
+            const targetAyah = lastInsertion.ayahs[0];
+            const queryText = lastInsertion.query.trim();
+
+            if (!lastInsertion.isSnippet) {
+                if (queryText.length > 0) {
+                    const snippetText = SnippetExtractor.extractQuranSnippet(targetAyah.text, queryText);
+                    if (snippetText !== targetAyah.text) {
+                        const dummyAyah: Ayah = { ...targetAyah, text: snippetText };
+                        const snippetOutput = ExecuteEditorTransaction.formatOutput([dummyAyah], settings);
+                        
+                        editor.setLine(cursor.line, snippetOutput);
+                        lastInsertion.isSnippet = true;
+                        return true;
+                    }
+                }
+            } else {
+                const fullOutput = ExecuteEditorTransaction.formatOutput(lastInsertion.ayahs, settings);
+                editor.setLine(cursor.line, fullOutput);
+                lastInsertion.isSnippet = false;
+                return true;
+            }
+        }
+
+        // 2. الأولوية الصارمة: الاقتصاص البيني الحركي عند وجود صيغة (كلمة1 - كلمة2) والمؤشر بداخلها
         const parenRegex = /\(([^)]+?-[^)]+?)\)/g;
         let parenMatch;
         while ((parenMatch = parenRegex.exec(currentLine)) !== null) {
@@ -26,7 +52,6 @@ export class ParseContextAndExtract {
             const endCh = parenMatch.index + parenMatch[0].length;
             
             if (cursor.ch >= startCh && cursor.ch <= endCh) {
-                // قراءة المصدر المرجعي المتواجد حياً على نفس السطر لمنع العشوائية والـ Misclicks حتماً
                 const refRegex = /\[([\u0600-\u06FF\s]+):(\d+)\]/;
                 const refMatch = currentLine.match(refRegex);
 
@@ -34,7 +59,6 @@ export class ParseContextAndExtract {
                     const surahNorm = QuranText.normalizeForSearch(refMatch[1]);
                     const ayahId = parseInt(QuranText.normalizeNumbers(refMatch[2]));
                     
-                    // جلب الآية الأصلية الصحيحة المطابقة للمرجع الحالي من المستودع
                     const actualAyah = this.repository.getAllAyahs().find(a => 
                         QuranText.normalizeForSearch(a.surah_name) === surahNorm && a.ayah_id === ayahId
                     );
@@ -44,14 +68,12 @@ export class ParseContextAndExtract {
                         const startWord = parts[0].trim();
                         const endWord = parts[1].trim();
                         
-                        // تنفيذ اقتصاص النطاق النقي بناءً على كلمات الآية الأصلية
                         const croppedText = SnippetExtractor.extractQuranRange(actualAyah.text, startWord, endWord);
                         
                         if (croppedText && croppedText !== actualAyah.text) {
                             const dummyAyah: Ayah = { ...actualAyah, text: croppedText };
                             const finalOutput = ExecuteEditorTransaction.formatOutput([dummyAyah], settings);
                             
-                            // استبدال السطر بالكامل بالمقطع المجرد والتخريج الصلب فوراً
                             editor.setLine(cursor.line, finalOutput);
                             return true;
                         }
@@ -60,13 +82,13 @@ export class ParseContextAndExtract {
             }
         }
 
-        // 2. الأولوية الثانية: النص المظلل
+        // 3. الأولوية الثالثة: النص المظلل
         let selectedText = editor.getSelection().trim();
         if (selectedText.length > 0) {
             return this.processTextQuery(editor, selectedText, editor.getCursor("from"), editor.getCursor("to"), settings, onAmbiguity);
         }
 
-        // 3. الأولوية الثالثة: الأقواس المتعرجة {...}
+        // 4. الأولوية الرابعة: الأقواس المتعرجة {...}
         const curlyMatch = currentLine.match(/\{([^}]+)\}/);
         if (curlyMatch) {
             const fullCurly = curlyMatch[0];
@@ -77,7 +99,7 @@ export class ParseContextAndExtract {
             return this.processTextQuery(editor, innerText, startPos, endPos, settings, onAmbiguity);
         }
 
-        // 4. الأولوية الرابعة: التحليل الرقمي والنطاقات الصريحة (البقرة: 1-3)
+        // 5. الأولوية الخامسة: التحليل الرقمي والنطاقات الصريحة (البقرة: 1-3)
         if (currentLine.trim().length > 0) {
             const rangeRegex = /(?:^|\s)([\u0600-\u06FF]+(?:\s+[\u0600-\u06FF]+){0,2})\s*[:\s]\s*(\d+(?:\s*-\s*\d+)?(?:\s*[,،]\s*\d+(?:\s*-\s*\d+)?)*)/g;
             const matches = [...currentLine.matchAll(rangeRegex)];
