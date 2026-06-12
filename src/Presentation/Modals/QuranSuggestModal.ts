@@ -40,11 +40,11 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
     onOpen() {
         super.onOpen();
         
-        // التحقق من تفعيل لوحة الإحصائيات من السيتنج قبل عملية الحقن الموضعي حتماً
+        // استهداف الحاوية الوالدة للمدخلات (prompt-input-container) لمطابقة شجرة السكريبت القديم مائة بالمائة
         if (this.settings.showAnalytics) {
-            const promptEl = this.modalEl.querySelector(".prompt");
-            if (promptEl) {
-                this.dashboard = new AnalyticsDashboard(promptEl as HTMLElement);
+            const inputContainer = this.inputEl.parentElement;
+            if (inputContainer) {
+                this.dashboard = new AnalyticsDashboard(inputContainer);
             }
         }
 

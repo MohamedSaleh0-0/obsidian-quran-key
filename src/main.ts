@@ -7,7 +7,7 @@ import { QuranSuggestModal } from "./Presentation/Modals/QuranSuggestModal";
 import { QuranKeySettingTab } from "./Presentation/Settings/SmartAyahSettings";
 
 export interface QuranKeySettings extends TransactionSettings {
-    showAnalytics: boolean; // خيار التحكم في لوحة الإحصائيات
+    showAnalytics: boolean;
 }
 
 const DEFAULT_SETTINGS: QuranKeySettings = {
@@ -18,7 +18,7 @@ const DEFAULT_SETTINGS: QuranKeySettings = {
     quranFontSize: 1.1,
     quranLineHeight: 2.1,
     quranColor: "#dfc56b",
-    showAnalytics: true // تشغيل اللوحة افتراضياً
+    showAnalytics: true
 };
 
 const quranDecorator = new MatchDecorator({
@@ -105,7 +105,7 @@ export default class QuranKeyPlugin extends Plugin {
             }
         });
 
-        // 1. أمر إزالة المصدر المرجعي [Surah:Verse] من السطر الحالي
+        // 1. أمر إزالة المصدر المرجعي [Surah:Verse] من السطر الحالي حتماً
         this.addCommand({
             id: "remove-quran-reference",
             name: "Remove Quran Reference From Line",
@@ -118,7 +118,7 @@ export default class QuranKeyPlugin extends Plugin {
             }
         });
 
-        // 2. أمر تحويل المصدر إلى حاشية سفلية (Footnote) متوافقة مع تصدير Pandoc
+        // 2. أمر تحويل المصدر إلى حاشية سفلية (Footnote) متوافقة تماماً مع تصدير Pandoc للـ Word
         this.addCommand({
             id: "convert-reference-to-footnote",
             name: "Convert Quran Reference To Footnote",
@@ -149,7 +149,7 @@ export default class QuranKeyPlugin extends Plugin {
             }
         });
 
-        // 3. أمر إزالة التشكيل العام من النص المظلل أو السطر الحالي
+        // 3. أمر إزالة التشكيل وعلامات الضبط من النص المظلل أو السطر بالكامل حركياً
         this.addCommand({
             id: "strip-tashkeel-globally",
             name: "Strip Tashkeel From Selection Or Line",

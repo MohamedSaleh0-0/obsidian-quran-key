@@ -9,7 +9,6 @@ export class QuranText {
     public static normalizeForSearch(text: string): string {
         if (!text) return "";
         
-        // التلصيم القاطع الصارم لـ يا أيها: توحيدها وتطهيرها تماماً قبل أي معالجة أو تقطيع
         let txt = text.trim()
             .replace(/يا\s+أيها/g, "يايها")
             .replace(/ياأيها/g, "يايها")
@@ -30,7 +29,7 @@ export class QuranText {
                  .replace(/ة/g, "ه")
                  .replace(/ـ/g, "");
                  
-        // دمج وضغط أي ألف مزدوجة متبقية ناتجة عن تداخل الإدخال (ياايها -> يايها) لتطابق المصحف حتماً
+        // إبادة علة الألف المزدوجة الناتجة عن تداخل الإدخال
         txt = txt.replace(/ياا/g, "يا");
 
         return txt
