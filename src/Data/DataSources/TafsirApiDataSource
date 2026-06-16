@@ -1,0 +1,26 @@
+import { requestUrl } from "obsidian";
+import { TafsirRepository } from "../Repositories/TafsirRepository";
+
+export class TafsirApiDataSource implements TafsirRepository {
+    private baseUrl = "https://tafsir.app/get.php";
+
+    /**
+     * جلب نص التفسير لآية محددة من كتاب معين أونلاين
+     */
+    public async fetchTafsir(bookId: string, surahId: number, ayahId: number): Promise<string> {
+        const url = `${this.baseUrl}?src=${bookId}&s=${surahId}&a=${ayahId}&ver=1`;
+
+        try {
+            const response = await requestUrl({ url });
+            
+            if (response.status === 200 && response.json && response.json.data) {
+                return response.json.data;
+            }
+            
+            return "";
+        } catch (error) {
+            console.error(`Quran Key Plugin: Error fetching tafsir for book ${bookId}, Surah ${surahId}, Ayah ${ayahId}`, error);
+            throw error; // نمرر الخطأ لأعلى لكي تتعامل معه حالة الاستخدام بحذر دون مسح الـ Trigger
+        }
+    }
+}
