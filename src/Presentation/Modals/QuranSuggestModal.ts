@@ -6,6 +6,7 @@ import { ExecuteEditorTransaction, TransactionSettings } from "../../UseCases/Ex
 import { AnalyticsDashboard } from "../Components/AnalyticsDashboard";
 import { QuranRangeEndSuggestModal } from "./QuranRangeEndSuggestModal";
 import { TafsirFallbackModal } from "./TafsirFallbackModal";
+import { FetchAndInsertTafsir } from "../../UseCases/FetchAndInsertTafsir";
 
 export class QuranSuggestModal extends SuggestModal<Ayah> {
     private repository: QuranRepository;
@@ -18,6 +19,7 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
     private dashboard!: AnalyticsDashboard;
     private currentQuery: string = "";
     private onVerseSelectOverride?: (ayahs: Ayah[]) => void;
+    private fetchAndInsertTafsirUseCase?: FetchAndInsertTafsir;
 
     constructor(
         app: App, 
@@ -28,7 +30,8 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
         preFilteredMatches: Ayah[] | null = null, 
         startPos: { line: number; ch: number } | null = null, 
         endPos: { line: number; ch: number } | null = null,
-        onVerseSelectOverride?: (ayahs: Ayah[]) => void
+        onVerseSelectOverride?: (ayahs: Ayah[]) => void,
+        fetchAndInsertTafsirUseCase?: FetchAndInsertTafsir
     ) {
         super(app);
         this.repository = repository;
@@ -39,6 +42,7 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
         this.startPos = startPos;
         this.endPos = endPos;
         this.onVerseSelectOverride = onVerseSelectOverride;
+        this.fetchAndInsertTafsirUseCase = fetchAndInsertTafsirUseCase;
         this.setPlaceholder("اكتب كلمات البحث بدقة لدراسة المواضع القرآنيّة...");
     }
 
@@ -52,7 +56,6 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
             }
         }
 
-        // مستمع أحداث صارم محصن في مرحلة الـ Capture لحسم الاختصارات ومنع ابتلاع محرك أوبسيديان لها
         this.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
             if (evt.key === "Enter") {
                 const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
@@ -81,25 +84,20 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
                     this.close();
 
                     if (isCtrlOrMeta) {
-                        // Ctrl + Enter -> فتح نافذة تحديد نهاية النطاق القرآني
-                        new QuranRangeEndSuggestModal(this.app, this.repository, this.editor, this.settings, targetItem, start, end, this.onVerseSelectOverride).open();
+                        new QuranRangeEndSuggestModal(this.app, this.repository, this.editor, this.settings, targetItem, start, end, this.onVerseSelectOverride, this.fetchAndInsertTafsirUseCase).open();
                     } else if (isShift) {
-                        // Shift + Enter -> الانتقال الفوري لمودال اختيار كتب التفسير المتعددة للآية المفردة
                         if (this.onVerseSelectOverride) {
                             this.onVerseSelectOverride([targetItem]);
-                        } else {
+                        } else if (this.fetchAndInsertTafsirUseCase) {
                             new TafsirFallbackModal(this.app, async (chosenBooks) => {
                                 if (chosenBooks.length === 0) return;
-                                const mainPlugin = (this.app as any).plugins.plugins["quran-key"];
-                                if (mainPlugin && mainPlugin.fetchAndInsertTafsirUseCase) {
-                                    const getAyahTextLocal = (sId: number, aId: number): string => {
-                                        const localAyah = this.repository.getAllAyahs().find(a => a.surah_id === sId && a.ayah_id === aId);
-                                        return localAyah ? localAyah.text : "";
-                                    };
-                                    await mainPlugin.fetchAndInsertTafsirUseCase.execute(
-                                        this.editor, "", start.line, targetItem.surah_id, targetItem.surah_name, targetItem.ayah_id, targetItem.ayah_id, getAyahTextLocal, this.settings, chosenBooks
-                                    );
-                                }
+                                const getAyahTextLocal = (sId: number, aId: number): string => {
+                                    const localAyah = this.repository.getAllAyahs().find(a => a.surah_id === sId && a.ayah_id === aId);
+                                    return localAyah ? localAyah.text : "";
+                                };
+                                await this.fetchAndInsertTafsirUseCase!.execute(
+                                    this.editor, "", start.line, targetItem.surah_id, targetItem.surah_name, targetItem.ayah_id, targetItem.ayah_id, getAyahTextLocal, this.settings, chosenBooks
+                                );
                             }).open();
                         }
                     }

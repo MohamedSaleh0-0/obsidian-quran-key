@@ -55,7 +55,7 @@ export default class QuranKeyPlugin extends Plugin {
     public contextParser!: ParseContextAndExtract;
     declare public settings: QuranKeySettings;
     private styleEl!: HTMLStyleElement;
-    private fetchAndInsertTafsirUseCase!: FetchAndInsertTafsir;
+    public fetchAndInsertTafsirUseCase!: FetchAndInsertTafsir;
 
     async onload() {
         console.log("Initializing Al-Furqan (Quran Key) Plugin...");
@@ -98,7 +98,7 @@ export default class QuranKeyPlugin extends Plugin {
             id: "open-quran-global-search",
             name: "Open Global Quran Search Modal",
             editorCallback: (editor) => {
-                new QuranSuggestModal(this.app, this.repository, editor, this.settings).open();
+                new QuranSuggestModal(this.app, this.repository, editor, this.settings, "", null, null, null, undefined, this.fetchAndInsertTafsirUseCase).open();
             }
         });
 
@@ -129,7 +129,7 @@ export default class QuranKeyPlugin extends Plugin {
                             this.fetchAndInsertTafsirUseCase.execute(
                                 editor, lineText, cursor.line, first.surah_id, first.surah_name, first.ayah_id, last.ayah_id, getAyahTextLocal, this.settings, chosenBooks
                             );
-                        }).open();
+                        }, this.fetchAndInsertTafsirUseCase).open();
                     }
                 }).open();
             }
@@ -143,12 +143,11 @@ export default class QuranKeyPlugin extends Plugin {
                     editor, 
                     this.settings, 
                     (query, matches, start, end) => {
-                        new QuranSuggestModal(this.app, this.repository, editor, this.settings, query, matches, start, end).open();
+                        new QuranSuggestModal(this.app, this.repository, editor, this.settings, query, matches, start, end, undefined, this.fetchAndInsertTafsirUseCase).open();
                     }
                 );
-                // Fallback الحتمي: إذا فشل استخراج آية من السطر، نفتح نافذة البحث الشاملة فوراً
                 if (!success) {
-                    new QuranSuggestModal(this.app, this.repository, editor, this.settings).open();
+                    new QuranSuggestModal(this.app, this.repository, editor, this.settings, "", null, null, null, undefined, this.fetchAndInsertTafsirUseCase).open();
                 }
             }
         });
@@ -172,7 +171,6 @@ export default class QuranKeyPlugin extends Plugin {
                         editor, lineText, cursor.line, context.surahId, context.surahName, context.startAyah, context.endAyah, getAyahTextLocal, this.settings
                     );
                 } else {
-                    // Fallback الحتمي: إذا لم يجد آية على السطر، يفتح المودال المتعدد للكتب ثم مودال اختيار الآيات
                     new TafsirFallbackModal(this.app, (chosenBooks) => {
                         if (chosenBooks.length === 0) return;
                         new QuranSuggestModal(this.app, this.repository, editor, this.settings, "", null, null, null, async (ayahs) => {
@@ -182,7 +180,7 @@ export default class QuranKeyPlugin extends Plugin {
                             await this.fetchAndInsertTafsirUseCase.execute(
                                 editor, lineText, cursor.line, first.surah_id, first.surah_name, first.ayah_id, last.ayah_id, getAyahTextLocal, this.settings, chosenBooks
                             );
-                        }).open();
+                        }, this.fetchAndInsertTafsirUseCase).open();
                     }).open();
                 }
             }
