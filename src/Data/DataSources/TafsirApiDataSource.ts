@@ -20,7 +20,7 @@ export class TafsirApiDataSource implements TafsirRepository {
             return "";
         } catch (error) {
             console.error(`Quran Key Plugin: Error fetching tafsir for book ${bookId}, Surah ${surahId}, Ayah ${ayahId}`, error);
-            throw error; // نمرر الخطأ لأعلى لكي تتعامل معه حالة الاستخدام بحذر دون مسح الـ Trigger
+            throw error;
         }
     }
 }

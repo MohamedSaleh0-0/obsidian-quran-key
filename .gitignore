@@ -18,6 +18,6 @@ ehthumbs.db
 .vscode/
 *.swp
 *.swo
-
+specs.md
 # Local Obsidian test environment (if applicable)
 .obsidian/

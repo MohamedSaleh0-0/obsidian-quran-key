@@ -5,6 +5,13 @@ import { ExecuteEditorTransaction, TransactionSettings } from "./ExecuteEditorTr
 import { Ayah } from "../Domain/Entities/Ayah";
 import { SnippetExtractor } from "../Domain/Services/SnippetExtractor";
 
+export interface ExtractedQuranContext {
+    surahId: number;
+    surahName: string;
+    startAyah: number;
+    endAyah: number;
+}
+
 export class ParseContextAndExtract {
     private repository: QuranRepository;
     private app: App;
@@ -14,13 +21,85 @@ export class ParseContextAndExtract {
         this.repository = repository;
     }
 
+    /**
+     * ميزة مضافة لنسخة v2: تحليل السطر الحالي واستخراج بيانات السورة والآيات دون تعديل المحرر
+     */
+    public analyzeLineContext(editor: Editor): ExtractedQuranContext | null {
+        const cursor = editor.getCursor();
+        const currentLine = editor.getLine(cursor.line);
+
+        if (!currentLine || currentLine.trim() === "") return null;
+
+        // 1. فحص ما إذا كان السطر يحتوي على آية مدرجة مسبقاً ﴿...﴾ [Surah:Verse]
+        const refRegex = /\[([\u0600-\u06FF\s]+):(\d+)(?:-(\d+))?\]/;
+        const refMatch = currentLine.match(refRegex);
+
+        if (refMatch) {
+            const surahNorm = QuranText.normalizeForSearch(refMatch[1]);
+            const foundSurah = this.findSurahByName(surahNorm);
+            if (foundSurah) {
+                const start = parseInt(QuranText.normalizeNumbers(refMatch[2]));
+                const end = refMatch[3] ? parseInt(QuranText.normalizeNumbers(refMatch[3])) : start;
+                return { surahId: foundSurah.id, surahName: foundSurah.name, startAyah: start, endAyah: end };
+            }
+        }
+
+        // 2. فحص الصيغة الرقمية الصريحة (البقرة: 1-3)
+        const rangeRegex = /(?:^|\s)([\u0600-\u06FF]+(?:\s+[\u0600-\u06FF]+){0,2})\s*[:\s]\s*(\d+(?:\s*-\s*\d+)?)/;
+        const rangeMatch = currentLine.match(rangeRegex);
+
+        if (rangeMatch) {
+            const surahQuery = QuranText.normalizeForSearch(rangeMatch[1]);
+            const foundSurah = this.findSurahByName(surahQuery);
+            if (foundSurah) {
+                const parts = rangeMatch[2].split("-");
+                const start = parseInt(QuranText.normalizeNumbers(parts[0]));
+                const end = parts[1] ? parseInt(QuranText.normalizeNumbers(parts[1])) : start;
+                return { surahId: foundSurah.id, surahName: foundSurah.name, startAyah: start, endAyah: end };
+            }
+        }
+
+        // 3. تشغيل النافذة المنزلقة (Sliding Window) لاستخراج السياق من الكلمات الخام
+        const maskedLine = currentLine.replace(/﴿.*?﴾/g, " ");
+        const rawWords = maskedLine.split(/\s+/).filter(w => w.trim().length > 0);
+        const giantString = this.repository.getGiantString();
+        const ayahsData = this.repository.getAllAyahs();
+
+        for (let len = Math.min(rawWords.length, 12); len >= 2; len--) {
+            for (let start = 0; start <= rawWords.length - len; start++) {
+                const rawSubSegment = rawWords.slice(start, start + len);
+                const combinedSegment = rawSubSegment.join(" ");
+                
+                const normalizedSegment = QuranText.normalizeForSearch(combinedSegment);
+                const normWords = normalizedSegment.split(/\s+/).filter(w => w.length > 0);
+                
+                if (normWords.length < 2) continue;
+
+                const strictRegex = new RegExp(`(?:^|\\s)${normWords.map(w => QuranText.makeMedialAlefsOptional(w)).join('\\s+')}(?:\\s|$)`);
+                if (!strictRegex.test(giantString)) continue;
+
+                const matches = ayahsData.filter(a => strictRegex.test(QuranText.normalizeForSearch(a.text)));
+                if (matches.length > 0) {
+                    const target = matches[0];
+                    return {
+                        surahId: target.surah_id,
+                        surahName: target.surah_name,
+                        startAyah: target.ayah_id,
+                        endAyah: target.ayah_id
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
+
     public execute(editor: Editor, settings: TransactionSettings, onAmbiguity: (query: string, matches: Ayah[], start: any, end: any) => void): boolean {
         const cursor = editor.getCursor();
         const currentLine = editor.getLine(cursor.line);
         const lastInsertion = ExecuteEditorTransaction.lastInsertion;
 
-        // 1. ميزة الـ Stateful Toggle Fallback: إدارة التبديل المتتالي بين الآية الكاملة وموضع الشاهد النقي
-        if (lastInsertion && lastInsertion.line === cursor.line && currentLine.includes("﴿") && currentLine.includes("﴾")) {
+        if (lastInsertion && lastInsertion.line === cursor.line && currentLine.indexOf("﴿") !== -1 && currentLine.indexOf("﴾") !== -1) {
             const targetAyah = lastInsertion.ayahs[0];
             const queryText = lastInsertion.query.trim();
 
@@ -44,7 +123,6 @@ export class ParseContextAndExtract {
             }
         }
 
-        // 2. الأولوية الصارمة: الاقتصاص البيني الحركي عند وجود صيغة (كلمة1 - كلمة2) والمؤشر بداخلها
         const parenRegex = /\(([^)]+?-[^)]+?)\)/g;
         let parenMatch;
         while ((parenMatch = parenRegex.exec(currentLine)) !== null) {
@@ -82,13 +160,11 @@ export class ParseContextAndExtract {
             }
         }
 
-        // 3. الأولوية الثالثة: النص المظلل
         let selectedText = editor.getSelection().trim();
         if (selectedText.length > 0) {
             return this.processTextQuery(editor, selectedText, editor.getCursor("from"), editor.getCursor("to"), settings, onAmbiguity);
         }
 
-        // 4. الأولوية الرابعة: الأقواس المتعرجة {...}
         const curlyMatch = currentLine.match(/\{([^}]+)\}/);
         if (curlyMatch) {
             const fullCurly = curlyMatch[0];
@@ -99,12 +175,11 @@ export class ParseContextAndExtract {
             return this.processTextQuery(editor, innerText, startPos, endPos, settings, onAmbiguity);
         }
 
-        // 5. الأولوية الخامسة: التحليل الرقمي والنطاقات الصريحة (البقرة: 1-3)
         if (currentLine.trim().length > 0) {
-            const rangeRegex = /(?:^|\s)([\u0600-\u06FF]+(?:\s+[\u0600-\u06FF]+){0,2})\s*[:\s]\s*(\d+(?:\s*-\s*\d+)?(?:\s*[,،]\s*\d+(?:\s*-\s*\d+)?)*)/g;
-            const matches = [...currentLine.matchAll(rangeRegex)];
+            const rangeRegexLoop = /(?:^|\s)([\u0600-\u06FF]+(?:\s+[\u0600-\u06FF]+){0,2})\s*[:\s]\s*(\d+(?:\s*-\s*\d+)?(?:\s*[,،]\s*\d+(?:\s*-\s*\d+)?)*)/g;
+            let match;
 
-            for (const match of matches) {
+            while ((match = rangeRegexLoop.exec(currentLine)) !== null) {
                 const surahQuery = QuranText.normalizeForSearch(match[1]);
                 const foundSurah = this.findSurahByName(surahQuery);
 
@@ -114,7 +189,7 @@ export class ParseContextAndExtract {
                     const targetAyahIds = this.parseVerseNumbers(match[2]);
                     
                     const ayahsData = this.repository.getAllAyahs();
-                    const matchedAyahs = ayahsData.filter(a => a.surah_id === foundSurah.id && targetAyahIds.includes(a.ayah_id));
+                    const matchedAyahs = ayahsData.filter(a => a.surah_id === foundSurah.id && targetAyahIds.indexOf(a.ayah_id) !== -1);
 
                     if (matchedAyahs.length > 0) {
                         ExecuteEditorTransaction.execute(editor, startPos, endPos, matchedAyahs, "", settings);

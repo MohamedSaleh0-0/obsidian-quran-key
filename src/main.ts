@@ -1,4 +1,4 @@
-import { Plugin, Notice } from "obsidian";
+import { Plugin, Notice, Editor } from "obsidian";
 import { MatchDecorator, ViewPlugin, Decoration, DecorationSet, EditorView, ViewUpdate } from "@codemirror/view";
 import { ObsidianVaultDataSource } from "./Data/DataSources/ObsidianVaultDataSource";
 import { ParseContextAndExtract } from "./UseCases/ParseContextAndExtract";
@@ -6,7 +6,13 @@ import { TransactionSettings } from "./UseCases/ExecuteEditorTransaction";
 import { QuranSuggestModal } from "./Presentation/Modals/QuranSuggestModal";
 import { QuranKeySettingTab } from "./Presentation/Settings/SmartAyahSettings";
 
-export interface QuranKeySettings extends TransactionSettings {
+import { TafsirApiDataSource } from "./Data/DataSources/TafsirApiDataSource";
+import { FetchAndInsertTafsir, TafsirSettings } from "./UseCases/FetchAndInsertTafsir";
+import { TafsirFallbackModal } from "./Presentation/Modals/TafsirFallbackModal";
+import { TAFSIR_BOOKS_LIST } from "./Domain/Constants/TafsirBooksList";
+import { TafsirBook } from "./Domain/Entities/TafsirBook";
+
+export interface QuranKeySettings extends TransactionSettings, TafsirSettings {
     showAnalytics: boolean;
 }
 
@@ -18,7 +24,13 @@ const DEFAULT_SETTINGS: QuranKeySettings = {
     quranFontSize: 1.1,
     quranLineHeight: 2.1,
     quranColor: "#dfc56b",
-    showAnalytics: true
+    showAnalytics: true,
+    defaultTafsirBookId: "saadi",
+    favoriteBooksIds: ["saadi", "ibn-katheer", "muyassar"],
+    rangeHeadingLevel: "###",
+    bookHeadingLevel: "####",
+    useHorizontalDivider: true,
+    includeAyahTextInTafsir: true
 };
 
 const quranDecorator = new MatchDecorator({
@@ -43,6 +55,7 @@ export default class QuranKeyPlugin extends Plugin {
     public contextParser!: ParseContextAndExtract;
     declare public settings: QuranKeySettings;
     private styleEl!: HTMLStyleElement;
+    private fetchAndInsertTafsirUseCase!: FetchAndInsertTafsir;
 
     async onload() {
         console.log("Initializing Al-Furqan (Quran Key) Plugin...");
@@ -52,6 +65,9 @@ export default class QuranKeyPlugin extends Plugin {
 
         this.repository = new ObsidianVaultDataSource(this.app.vault);
         this.contextParser = new ParseContextAndExtract(this.app, this.repository);
+        
+        const tafsirDataSource = new TafsirApiDataSource();
+        this.fetchAndInsertTafsirUseCase = new FetchAndInsertTafsir(tafsirDataSource);
 
         this.app.workspace.onLayoutReady(async () => {
             const success = await this.repository.loadAll();
@@ -105,7 +121,48 @@ export default class QuranKeyPlugin extends Plugin {
             }
         });
 
-        // 1. أمر إزالة المصدر المرجعي [Surah:Verse] من السطر الحالي حتماً
+        this.addCommand({
+            id: "fetch-contextual-tafsir",
+            name: "Fetch Contextual Tafsir for Current Line",
+            editorCallback: async (editor: Editor) => {
+                const cursor = editor.getCursor();
+                const lineText = editor.getLine(cursor.line);
+
+                if (!lineText || lineText.trim() === "") return;
+
+                const context = this.contextParser.analyzeLineContext(editor);
+
+                if (!context) {
+                    new Notice("لم يتم التعرف على آيات قرآنية في هذا السطر لجلب تفسيرها.");
+                    return;
+                }
+
+                const getAyahTextLocal = (sId: number, aId: number): string => {
+                    const localAyah = this.repository.getAllAyahs().find(a => a.surah_id === sId && a.ayah_id === aId);
+                    return localAyah ? localAyah.text : "";
+                };
+
+                await this.fetchAndInsertTafsirUseCase.execute(
+                    editor,
+                    lineText,
+                    cursor.line,
+                    context.surahId,
+                    context.surahName,
+                    context.startAyah,
+                    context.endAyah,
+                    getAyahTextLocal,
+                    this.settings,
+                    (booksPool: TafsirBook[]) => {
+                        return new Promise((resolve) => {
+                            new TafsirFallbackModal(this.app, booksPool, (selected) => {
+                                resolve(selected);
+                            }).open();
+                        });
+                    }
+                );
+            }
+        });
+
         this.addCommand({
             id: "remove-quran-reference",
             name: "Remove Quran Reference From Line",
@@ -118,14 +175,13 @@ export default class QuranKeyPlugin extends Plugin {
             }
         });
 
-        // 2. أمر تحويل المصدر إلى حاشية سفلية (Footnote) متوافقة تماماً مع تصدير Pandoc للـ Word
         this.addCommand({
             id: "convert-reference-to-footnote",
             name: "Convert Quran Reference To Footnote",
             editorCallback: (editor) => {
                 const lineNum = editor.getCursor().line;
                 const lineText = editor.getLine(lineNum);
-                const refRegex = /\[([\u0600-\u06FF\s]+:\d+(?:-\d+)?)\]/;
+                const refRegex = /\[([\u0600-\u06FF\s]+):(\d+)(?:-(\d+))?\]/;
                 const match = lineText.match(refRegex);
 
                 if (match) {
@@ -149,7 +205,6 @@ export default class QuranKeyPlugin extends Plugin {
             }
         });
 
-        // 3. أمر إزالة التشكيل وعلامات الضبط من النص المظلل أو السطر بالكامل حركياً
         this.addCommand({
             id: "strip-tashkeel-globally",
             name: "Strip Tashkeel From Selection Or Line",

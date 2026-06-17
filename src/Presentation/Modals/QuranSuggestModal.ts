@@ -4,6 +4,7 @@ import { QuranRepository } from "../../Data/Repositories/QuranRepository";
 import { QuranText } from "../../Domain/ValueObjects/QuranText";
 import { ExecuteEditorTransaction, TransactionSettings } from "../../UseCases/ExecuteEditorTransaction";
 import { AnalyticsDashboard } from "../Components/AnalyticsDashboard";
+import { QuranRangeEndSuggestModal } from "./QuranRangeEndSuggestModal";
 
 export class QuranSuggestModal extends SuggestModal<Ayah> {
     private repository: QuranRepository;
@@ -40,7 +41,6 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
     onOpen() {
         super.onOpen();
         
-        // استهداف الحاوية الوالدة للمدخلات (prompt-input-container) لمطابقة شجرة السكريبت القديم مائة بالمائة
         if (this.settings.showAnalytics) {
             const inputContainer = this.inputEl.parentElement;
             if (inputContainer) {
@@ -126,14 +126,19 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
     }
 
     onChooseSuggestion(item: Ayah, evt: MouseEvent | KeyboardEvent) {
+        const start = this.startPos || this.editor.getCursor("from");
+        const end = this.endPos || this.editor.getCursor("to");
+
+        // رصد اختصار Ctrl + Enter لبدء سلسلة النوافذ المتتالية للنطاق
+        if (evt && (evt.ctrlKey || evt.metaKey)) {
+            new QuranRangeEndSuggestModal(this.app, this.repository, this.editor, this.settings, item, start, end).open();
+            return;
+        }
+
         const currentSettings = { ...this.settings };
-        
         if (evt.shiftKey) {
             currentSettings.stripTashkeel = true;
         }
-
-        const start = this.startPos || this.editor.getCursor("from");
-        const end = this.endPos || this.editor.getCursor("to");
 
         ExecuteEditorTransaction.execute(this.editor, start, end, [item], this.currentQuery, currentSettings);
     }
