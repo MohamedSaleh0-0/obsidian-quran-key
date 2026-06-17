@@ -77,6 +77,11 @@ export class FetchAndInsertTafsir {
                         }
                     }
 
+                    // صمام أمان حركي: التهدئة بفاصل 150ms عند جلب النطاقات المتعددة حماية للمستخدم من الـ IP Block
+                    if (ayahRange.length > 2) {
+                        await new Promise(resolve => setTimeout(resolve, 150));
+                    }
+
                     const rawContent = await this.repository.fetchTafsir(book.id, surahId, ayahId);
                     if (rawContent && rawContent.trim() !== "") {
                         combinedBookText += ayahRange.length > 1 

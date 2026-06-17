@@ -4,7 +4,7 @@ import { ObsidianVaultDataSource } from "./Data/DataSources/ObsidianVaultDataSou
 import { ParseContextAndExtract } from "./UseCases/ParseContextAndExtract";
 import { TransactionSettings } from "./UseCases/ExecuteEditorTransaction";
 import { QuranSuggestModal } from "./Presentation/Modals/QuranSuggestModal";
-import { QuranKeySettingTab } from "./Presentation/Settings/SmartAyahSettings";
+import { QuranKeySettingTab } from "./Presentation/Settings/QuranKeySettingsTab";
 
 import { TafsirApiDataSource } from "./Data/DataSources/TafsirApiDataSource";
 import { FetchAndInsertTafsir, TafsirSettings } from "./UseCases/FetchAndInsertTafsir";
