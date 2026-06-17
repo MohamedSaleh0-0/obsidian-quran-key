@@ -261,6 +261,13 @@ export default class QuranKeyPlugin extends Plugin {
             .markdown-source-view.mod-cm6 .cm-line:has(.cm-quran-key-text) {
                 line-height: ${this.settings.quranLineHeight + 0.4} !important;
             }
+            .quran-key-modal-alias {
+                color: var(--text-muted) !important;
+                font-size: 0.82em !important;
+                font-style: italic !important;
+                margin-right: 8px !important;
+                opacity: 0.75;
+            }
         `;
     }
 }
