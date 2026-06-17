@@ -5,6 +5,7 @@ import { QuranText } from "../../Domain/ValueObjects/QuranText";
 import { ExecuteEditorTransaction, TransactionSettings } from "../../UseCases/ExecuteEditorTransaction";
 import { AnalyticsDashboard } from "../Components/AnalyticsDashboard";
 import { QuranRangeEndSuggestModal } from "./QuranRangeEndSuggestModal";
+import { TafsirFallbackModal } from "./TafsirFallbackModal";
 
 export class QuranSuggestModal extends SuggestModal<Ayah> {
     private repository: QuranRepository;
@@ -16,6 +17,7 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
     private settings: any; 
     private dashboard!: AnalyticsDashboard;
     private currentQuery: string = "";
+    private onVerseSelectOverride?: (ayahs: Ayah[]) => void;
 
     constructor(
         app: App, 
@@ -25,7 +27,8 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
         initialQuery: string = "", 
         preFilteredMatches: Ayah[] | null = null, 
         startPos: { line: number; ch: number } | null = null, 
-        endPos: { line: number; ch: number } | null = null
+        endPos: { line: number; ch: number } | null = null,
+        onVerseSelectOverride?: (ayahs: Ayah[]) => void
     ) {
         super(app);
         this.repository = repository;
@@ -35,6 +38,7 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
         this.preFilteredMatches = preFilteredMatches;
         this.startPos = startPos;
         this.endPos = endPos;
+        this.onVerseSelectOverride = onVerseSelectOverride;
         this.setPlaceholder("اكتب كلمات البحث بدقة لدراسة المواضع القرآنيّة...");
     }
 
@@ -47,6 +51,61 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
                 this.dashboard = new AnalyticsDashboard(inputContainer);
             }
         }
+
+        // مستمع أحداث صارم محصن في مرحلة الـ Capture لحسم الاختصارات ومنع ابتلاع محرك أوبسيديان لها
+        this.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
+            if (evt.key === "Enter") {
+                const isCtrlOrMeta = evt.ctrlKey || evt.metaKey;
+                const isShift = evt.shiftKey;
+
+                if (isCtrlOrMeta || isShift) {
+                    evt.preventDefault();
+                    evt.stopPropagation();
+
+                    const suggestions = this.getSuggestions(this.inputEl.value);
+                    if (suggestions.length === 0) return;
+
+                    const activeEl = this.modalEl.querySelector(".suggestion-item.is-selected");
+                    let targetItem = suggestions[0];
+                    if (activeEl) {
+                        const allItems = Array.from(this.modalEl.querySelectorAll(".suggestion-item"));
+                        const idx = allItems.indexOf(activeEl);
+                        if (idx !== -1 && suggestions[idx]) {
+                            targetItem = suggestions[idx];
+                        }
+                    }
+
+                    const start = this.startPos || this.editor.getCursor("from");
+                    const end = this.endPos || this.editor.getCursor("to");
+
+                    this.close();
+
+                    if (isCtrlOrMeta) {
+                        // Ctrl + Enter -> فتح نافذة تحديد نهاية النطاق القرآني
+                        new QuranRangeEndSuggestModal(this.app, this.repository, this.editor, this.settings, targetItem, start, end, this.onVerseSelectOverride).open();
+                    } else if (isShift) {
+                        // Shift + Enter -> الانتقال الفوري لمودال اختيار كتب التفسير المتعددة للآية المفردة
+                        if (this.onVerseSelectOverride) {
+                            this.onVerseSelectOverride([targetItem]);
+                        } else {
+                            new TafsirFallbackModal(this.app, async (chosenBooks) => {
+                                if (chosenBooks.length === 0) return;
+                                const mainPlugin = (this.app as any).plugins.plugins["quran-key"];
+                                if (mainPlugin && mainPlugin.fetchAndInsertTafsirUseCase) {
+                                    const getAyahTextLocal = (sId: number, aId: number): string => {
+                                        const localAyah = this.repository.getAllAyahs().find(a => a.surah_id === sId && a.ayah_id === aId);
+                                        return localAyah ? localAyah.text : "";
+                                    };
+                                    await mainPlugin.fetchAndInsertTafsirUseCase.execute(
+                                        this.editor, "", start.line, targetItem.surah_id, targetItem.surah_name, targetItem.ayah_id, targetItem.ayah_id, getAyahTextLocal, this.settings, chosenBooks
+                                    );
+                                }
+                            }).open();
+                        }
+                    }
+                }
+            }
+        }, true);
 
         if (this.initialQuery) {
             this.inputEl.value = this.initialQuery;
@@ -129,17 +188,11 @@ export class QuranSuggestModal extends SuggestModal<Ayah> {
         const start = this.startPos || this.editor.getCursor("from");
         const end = this.endPos || this.editor.getCursor("to");
 
-        // رصد اختصار Ctrl + Enter لبدء سلسلة النوافذ المتتالية للنطاق
-        if (evt && (evt.ctrlKey || evt.metaKey)) {
-            new QuranRangeEndSuggestModal(this.app, this.repository, this.editor, this.settings, item, start, end).open();
+        if (this.onVerseSelectOverride) {
+            this.onVerseSelectOverride([item]);
             return;
         }
 
-        const currentSettings = { ...this.settings };
-        if (evt.shiftKey) {
-            currentSettings.stripTashkeel = true;
-        }
-
-        ExecuteEditorTransaction.execute(this.editor, start, end, [item], this.currentQuery, currentSettings);
+        ExecuteEditorTransaction.execute(this.editor, start, end, [item], this.currentQuery, this.settings);
     }
 }

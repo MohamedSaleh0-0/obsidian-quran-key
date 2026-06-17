@@ -3,6 +3,7 @@ import { Ayah } from "../../Domain/Entities/Ayah";
 import { QuranRepository } from "../../Data/Repositories/QuranRepository";
 import { QuranText } from "../../Domain/ValueObjects/QuranText";
 import { ExecuteEditorTransaction, TransactionSettings } from "../../UseCases/ExecuteEditorTransaction";
+import { TafsirFallbackModal } from "./TafsirFallbackModal";
 
 export class QuranRangeEndSuggestModal extends SuggestModal<Ayah> {
     private repository: QuranRepository;
@@ -11,6 +12,7 @@ export class QuranRangeEndSuggestModal extends SuggestModal<Ayah> {
     private startAyah: Ayah;
     private startPos: { line: number; ch: number };
     private endPos: { line: number; ch: number };
+    private onVerseSelectOverride?: (ayahs: Ayah[]) => void;
 
     constructor(
         app: App,
@@ -19,7 +21,8 @@ export class QuranRangeEndSuggestModal extends SuggestModal<Ayah> {
         settings: TransactionSettings,
         startAyah: Ayah,
         startPos: { line: number; ch: number },
-        endPos: { line: number; ch: number }
+        endPos: { line: number; ch: number },
+        onVerseSelectOverride?: (ayahs: Ayah[]) => void
     ) {
         super(app);
         this.repository = repository;
@@ -28,11 +31,62 @@ export class QuranRangeEndSuggestModal extends SuggestModal<Ayah> {
         this.startAyah = startAyah;
         this.startPos = startPos;
         this.endPos = endPos;
+        this.onVerseSelectOverride = onVerseSelectOverride;
         this.setPlaceholder(`اختر آية نهاية النطاق لسورة ${startAyah.surah_name} (تبدأ من الآية ${startAyah.ayah_id})...`);
     }
 
+    onOpen() {
+        super.onOpen();
+
+        // مستمع أحداث صارم لالتقاط Shift + Enter للنطاق الكامل وتوجيهه للمفسر المتعدد مباشرة
+        this.inputEl.addEventListener("keydown", (evt: KeyboardEvent) => {
+            if (evt.key === "Enter" && evt.shiftKey) {
+                evt.preventDefault();
+                evt.stopPropagation();
+
+                const suggestions = this.getSuggestions(this.inputEl.value);
+                if (suggestions.length === 0) return;
+
+                const activeEl = this.modalEl.querySelector(".suggestion-item.is-selected");
+                let endAyah = suggestions[0];
+                if (activeEl) {
+                    const allItems = Array.from(this.modalEl.querySelectorAll(".suggestion-item"));
+                    const idx = allItems.indexOf(activeEl);
+                    if (idx !== -1 && suggestions[idx]) {
+                        endAyah = suggestions[idx];
+                    }
+                }
+
+                const rangeAyahs = this.repository.getAllAyahs().filter(a => 
+                    a.surah_id === this.startAyah.surah_id && 
+                    a.ayah_id >= this.startAyah.ayah_id && 
+                    a.ayah_id <= endAyah.ayah_id
+                );
+
+                this.close();
+
+                if (this.onVerseSelectOverride) {
+                    this.onVerseSelectOverride(rangeAyahs);
+                } else {
+                    new TafsirFallbackModal(this.app, async (chosenBooks) => {
+                        if (chosenBooks.length === 0) return;
+                        const mainPlugin = (this.app as any).plugins.plugins["quran-key"];
+                        if (mainPlugin && mainPlugin.fetchAndInsertTafsirUseCase) {
+                            const getAyahTextLocal = (sId: number, aId: number): string => {
+                                const localAyah = this.repository.getAllAyahs().find(a => a.surah_id === sId && a.ayah_id === aId);
+                                return localAyah ? localAyah.text : "";
+                            };
+                            await mainPlugin.fetchAndInsertTafsirUseCase.execute(
+                                this.editor, "", this.startPos.line, this.startAyah.surah_id, this.startAyah.surah_name, this.startAyah.ayah_id, endAyah.ayah_id, getAyahTextLocal, this.settings, chosenBooks
+                            );
+                        }
+                    }).open();
+                }
+            }
+        }, true);
+    }
+
     getSuggestions(query: string): Ayah[] {
-        // تصفية الآيات لتعرض فقط آيات نفس السورة التي تقع بعد أو تطابق آية البداية
         const surahPool = this.repository.getAllAyahs().filter(a => 
             a.surah_id === this.startAyah.surah_id && a.ayah_id >= this.startAyah.ayah_id
         );
@@ -56,25 +110,23 @@ export class QuranRangeEndSuggestModal extends SuggestModal<Ayah> {
         container.innerText = item.text;
         
         const metaContainer = el.createEl("small", { 
-            text: `الآية ${item.ayah_id} (نهاية النطاق المحتملة)`
+            text: `الآية ${item.ayah_id}`
         });
         metaContainer.style.cssText = "color: var(--text-muted); display: block; margin-top: 4px; text-align: right; direction: rtl;";
     }
 
     onChooseSuggestion(endAyah: Ayah, evt: MouseEvent | KeyboardEvent) {
-        // تجميع كافة الآيات الواقعة داخل النطاق المحدد من البداية للنهاية حركياً
         const rangeAyahs = this.repository.getAllAyahs().filter(a => 
             a.surah_id === this.startAyah.surah_id && 
             a.ayah_id >= this.startAyah.ayah_id && 
             a.ayah_id <= endAyah.ayah_id
         );
 
-        const currentSettings = { ...this.settings };
-        if (evt.shiftKey) {
-            currentSettings.stripTashkeel = true;
+        if (this.onVerseSelectOverride) {
+            this.onVerseSelectOverride(rangeAyahs);
+            return;
         }
 
-        // إدراج النطاق كاملاً ذرياً داخل المحرر وتحديث بيانات الـ Toggle المرجعي
-        ExecuteEditorTransaction.execute(this.editor, this.startPos, this.endPos, rangeAyahs, "", currentSettings);
+        ExecuteEditorTransaction.execute(this.editor, this.startPos, this.endPos, rangeAyahs, "", this.settings);
     }
 }

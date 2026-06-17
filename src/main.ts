@@ -1,4 +1,4 @@
-import { Plugin, Notice, Editor } from "obsidian";
+import { Plugin, Editor } from "obsidian";
 import { MatchDecorator, ViewPlugin, Decoration, DecorationSet, EditorView, ViewUpdate } from "@codemirror/view";
 import { ObsidianVaultDataSource } from "./Data/DataSources/ObsidianVaultDataSource";
 import { ParseContextAndExtract } from "./UseCases/ParseContextAndExtract";
@@ -70,12 +70,7 @@ export default class QuranKeyPlugin extends Plugin {
         this.fetchAndInsertTafsirUseCase = new FetchAndInsertTafsir(tafsirDataSource);
 
         this.app.workspace.onLayoutReady(async () => {
-            const success = await this.repository.loadAll();
-            if (success) {
-                new Notice("تم تحميل المصحف الشريف في الذاكرة بنجاح (Quran Key).");
-            } else {
-                new Notice("تنبيه: لم يتم العثور على ملف ayahs.json في مسار الإضافة الحالي.");
-            }
+            await this.repository.loadAll();
         });
 
         this.addSettingTab(new QuranKeySettingTab(this.app, this));
@@ -108,16 +103,53 @@ export default class QuranKeyPlugin extends Plugin {
         });
 
         this.addCommand({
+            id: "open-tafsir-global-modal",
+            name: "Open Global Tafsir Selection Modal",
+            editorCallback: (editor: Editor) => {
+                const getAyahTextLocal = (sId: number, aId: number): string => {
+                    const localAyah = this.repository.getAllAyahs().find(a => a.surah_id === sId && a.ayah_id === aId);
+                    return localAyah ? localAyah.text : "";
+                };
+
+                new TafsirFallbackModal(this.app, (chosenBooks) => {
+                    if (chosenBooks.length === 0) return;
+                    const cursor = editor.getCursor();
+                    const lineText = editor.getLine(cursor.line);
+                    const context = this.contextParser.analyzeLineContext(editor);
+
+                    if (context) {
+                        this.fetchAndInsertTafsirUseCase.execute(
+                            editor, lineText, cursor.line, context.surahId, context.surahName, context.startAyah, context.endAyah, getAyahTextLocal, this.settings, chosenBooks
+                        );
+                    } else {
+                        new QuranSuggestModal(this.app, this.repository, editor, this.settings, "", null, null, null, async (ayahs) => {
+                            if (ayahs.length === 0) return;
+                            const first = ayahs[0];
+                            const last = ayahs[ayahs.length - 1];
+                            this.fetchAndInsertTafsirUseCase.execute(
+                                editor, lineText, cursor.line, first.surah_id, first.surah_name, first.ayah_id, last.ayah_id, getAyahTextLocal, this.settings, chosenBooks
+                            );
+                        }).open();
+                    }
+                }).open();
+            }
+        });
+
+        this.addCommand({
             id: "extract-quran-context",
             name: "Extract Quran Verse from Context",
             editorCallback: (editor) => {
-                this.contextParser.execute(
+                const success = this.contextParser.execute(
                     editor, 
                     this.settings, 
                     (query, matches, start, end) => {
                         new QuranSuggestModal(this.app, this.repository, editor, this.settings, query, matches, start, end).open();
                     }
                 );
+                // Fallback الحتمي: إذا فشل استخراج آية من السطر، نفتح نافذة البحث الشاملة فوراً
+                if (!success) {
+                    new QuranSuggestModal(this.app, this.repository, editor, this.settings).open();
+                }
             }
         });
 
@@ -128,38 +160,31 @@ export default class QuranKeyPlugin extends Plugin {
                 const cursor = editor.getCursor();
                 const lineText = editor.getLine(cursor.line);
 
-                if (!lineText || lineText.trim() === "") return;
-
-                const context = this.contextParser.analyzeLineContext(editor);
-
-                if (!context) {
-                    new Notice("لم يتم التعرف على آيات قرآنية في هذا السطر لجلب تفسيرها.");
-                    return;
-                }
-
                 const getAyahTextLocal = (sId: number, aId: number): string => {
                     const localAyah = this.repository.getAllAyahs().find(a => a.surah_id === sId && a.ayah_id === aId);
                     return localAyah ? localAyah.text : "";
                 };
 
-                await this.fetchAndInsertTafsirUseCase.execute(
-                    editor,
-                    lineText,
-                    cursor.line,
-                    context.surahId,
-                    context.surahName,
-                    context.startAyah,
-                    context.endAyah,
-                    getAyahTextLocal,
-                    this.settings,
-                    (booksPool: TafsirBook[]) => {
-                        return new Promise((resolve) => {
-                            new TafsirFallbackModal(this.app, booksPool, (selected) => {
-                                resolve(selected);
-                            }).open();
-                        });
-                    }
-                );
+                const context = this.contextParser.analyzeLineContext(editor);
+                
+                if (context) {
+                    await this.fetchAndInsertTafsirUseCase.execute(
+                        editor, lineText, cursor.line, context.surahId, context.surahName, context.startAyah, context.endAyah, getAyahTextLocal, this.settings
+                    );
+                } else {
+                    // Fallback الحتمي: إذا لم يجد آية على السطر، يفتح المودال المتعدد للكتب ثم مودال اختيار الآيات
+                    new TafsirFallbackModal(this.app, (chosenBooks) => {
+                        if (chosenBooks.length === 0) return;
+                        new QuranSuggestModal(this.app, this.repository, editor, this.settings, "", null, null, null, async (ayahs) => {
+                            if (ayahs.length === 0) return;
+                            const first = ayahs[0];
+                            const last = ayahs[ayahs.length - 1];
+                            await this.fetchAndInsertTafsirUseCase.execute(
+                                editor, lineText, cursor.line, first.surah_id, first.surah_name, first.ayah_id, last.ayah_id, getAyahTextLocal, this.settings, chosenBooks
+                            );
+                        }).open();
+                    }).open();
+                }
             }
         });
 
@@ -171,7 +196,6 @@ export default class QuranKeyPlugin extends Plugin {
                 const lineText = editor.getLine(lineNum);
                 const cleanLine = lineText.replace(/\s*\[[\u0600-\u06FF\s]+:\d+(?:-\d+)?\]/g, "");
                 editor.setLine(lineNum, cleanLine);
-                new Notice("تمت إزالة المصدر المرجعي من السطر.");
             }
         });
 
@@ -198,9 +222,6 @@ export default class QuranKeyPlugin extends Plugin {
                     const footerString = `\n\n${footnoteTag}: ${match[1]}`;
                     
                     editor.replaceRange(footerString, { line: lastLineNum, ch: lastLineText.length });
-                    new Notice(`تم تحويل المرجع إلى حاشية سفلية ${footnoteTag}`);
-                } else {
-                    new Notice("لم يتم العثور على مرجع تخريج صالح في هذا السطر.");
                 }
             }
         });
@@ -221,7 +242,6 @@ export default class QuranKeyPlugin extends Plugin {
                     const cleanLine = lineText.replace(tashkeelRegex, "");
                     editor.setLine(lineNum, cleanLine);
                 }
-                new Notice("تم تجريد النص من التشكيل وعلامات الضبط.");
             }
         });
     }
